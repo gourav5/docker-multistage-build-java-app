@@ -1,18 +1,18 @@
-# Use full Node.js image
-FROM node:18
+# Stage 1 — Builder
+FROM node:18 AS builder
 
-# Set working directory
 WORKDIR /app
-
-# Copy source files
-COPY . .
-
-# Install dependencies (empty in this example but placeholder)
+COPY package*.json ./
 RUN npm install
 
-# Expose port
-EXPOSE 4000
+COPY . .
 
-# Run the app
+# Stage 2 — Runtime
+FROM node:18-slim
+
+WORKDIR /app
+COPY --from=builder /app .
+
+EXPOSE 4000
 CMD ["npm", "start"]
 
