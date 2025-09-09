@@ -1,0 +1,11 @@
+{
+  "name": "hello-app",
+  "version": "1.0.0",
+  "description": "Simple Hello World Node.js app",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {}
+}
+
