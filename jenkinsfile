@@ -1,0 +1,62 @@
+pipeline {
+    agent any
+
+    environment {
+        REMOTE_USER = 'gourav'                      // SSH username
+        REMOTE_HOST = '192.168.1.10'                    // Remote server IP
+        REMOTE_SSH_CREDENTIALS = 'docker-server' // Jenkins SSH credentials ID
+        CONTAINER_NAME = 'java-multistage-build-app'
+        REPO_URL = 'https://github.com/gourav5/docker-multistage-build-java-app.git' // GitHub repo
+        APP_DIR = '/tmp/jenkins_app'               // Directory on remote server
+        IMAGE_NAME = 'java-multistage-app:latest'                // Docker image name
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                echo "Fetching code from GitHub..."
+                checkout([$class: 'GitSCM',
+                    branches: [[name: '*/main']],
+                    userRemoteConfigs: [[url: "${REPO_URL}"]]
+                ])
+            }
+        }
+
+        stage('Copy to Remote Server') {
+            steps {
+                sshagent (credentials: ["${REMOTE_SSH_CREDENTIALS}"]) {
+                    echo "Copying code to remote server..."
+                    sh """
+                    ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} 'rm -rf ${APP_DIR} && mkdir -p ${APP_DIR}'
+                    scp -o StrictHostKeyChecking=no -r * ${REMOTE_USER}@${REMOTE_HOST}:${APP_DIR}/
+                    """
+                }
+            }
+        }
+
+        stage('Build and Run Container') {
+            steps {
+                sshagent (credentials: ["${REMOTE_SSH_CREDENTIALS}"]) {
+                    echo "Building and running Docker container on remote server..."
+                    sh """
+                    ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} '
+                        cd ${APP_DIR} &&
+                        DOCKER_BUILDKIT=1 docker build --cache-from=${IMAGE_NAME} -t ${IMAGE_NAME} . &&
+                        docker stop ${CONTAINER_NAME} || true &&
+                        docker rm ${CONTAINER_NAME} || true &&
+                        docker run -d --name ${CONTAINER_NAME} -p 4000:4000 ${IMAGE_NAME}
+                    '
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo "Cleaning up workspace..."
+            deleteDir()
+        }
+    }
+}
+
