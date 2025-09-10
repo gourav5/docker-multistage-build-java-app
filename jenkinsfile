@@ -2,13 +2,13 @@ pipeline {
     agent any
 
     environment {
-        REMOTE_USER = 'gourav'                      // SSH username
-        REMOTE_HOST = '192.168.1.10'                    // Remote server IP
-        REMOTE_SSH_CREDENTIALS = 'docker-server' // Jenkins SSH credentials ID
+        REMOTE_USER = 'gourav'                      
+        REMOTE_HOST = '192.168.1.10'                 
+        REMOTE_SSH_CREDENTIALS = 'docker-server'     
         CONTAINER_NAME = 'java-multistage-build-app'
-        REPO_URL = 'https://github.com/gourav5/docker-multistage-build-java-app.git' // GitHub repo
-        APP_DIR = '/tmp/jenkins_app'               // Directory on remote server
-        IMAGE_NAME = 'java-multistage-app:latest'                // Docker image name
+        REPO_URL = 'https://github.com/gourav5/docker-multistage-build-java-app.git'
+        APP_DIR = '/tmp/jenkins_app'
+        IMAGE_NAME = 'java-multistage-app:latest'
     }
 
     stages {
@@ -34,14 +34,40 @@ pipeline {
             }
         }
 
-        stage('Build and Run Container') {
+        stage('Build Image') {
             steps {
                 sshagent (credentials: ["${REMOTE_SSH_CREDENTIALS}"]) {
-                    echo "Building and running Docker container on remote server..."
+                    echo "Building Docker image on remote server..."
                     sh """
                     ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} '
                         cd ${APP_DIR} &&
-                        DOCKER_BUILDKIT=1 docker build --cache-from=${IMAGE_NAME} -t ${IMAGE_NAME} . &&
+                        DOCKER_BUILDKIT=1 docker build --no-cache -t ${IMAGE_NAME} .
+                    '
+                    """
+                }
+            }
+        }
+
+        stage('Scan Image') {
+            steps {
+                sshagent (credentials: ["${REMOTE_SSH_CREDENTIALS}"]) {
+                    echo "Running Trivy scan on the built image..."
+                    sh """
+                    ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} '
+                        trivy image --download-db-only --severity HIGH,CRITICAL --exit-code 1 --format table --output /tmp/trivy-report.txt ${IMAGE_NAME} || true
+                        cat /tmp/trivy-report.txt
+                    '
+                    """
+                }
+            }
+        }
+
+        stage('Deployement on Server') {
+            steps {
+                sshagent (credentials: ["${REMOTE_SSH_CREDENTIALS}"]) {
+                    echo "Running Docker container on remote server..."
+                    sh """
+                    ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} '
                         docker stop ${CONTAINER_NAME} || true &&
                         docker rm ${CONTAINER_NAME} || true &&
                         docker run -d --name ${CONTAINER_NAME} -p 4000:4000 ${IMAGE_NAME}
@@ -57,6 +83,44 @@ pipeline {
             echo "Cleaning up workspace..."
             deleteDir()
         }
+        success {
+            script {
+                slackNotify("✅ Build and scan completed successfully!")
+            }
+        }
+        unstable {
+            script {
+                slackNotify("⚠️ Build completed but vulnerabilities found. Please review!")
+            }
+        }
+        failure {
+            script {
+                def report = ""
+                try {
+                    report = readFile('/tmp/trivy-report.txt').take(500)
+                } catch (err) {
+                    report = "Could not read the report."
+                }
+                slackNotify("❌ Build failed due to critical vulnerabilities!\n```" + report + "```")
+            }
+        }
+    }
+}
+
+def slackNotify(String message) {
+    def statusEmoji = currentBuild.currentResult == 'SUCCESS' ? '\\u2705' : '\\u274C'
+    def msg = """
+    {
+        "text": "${statusEmoji} *${env.JOB_NAME}* [#${env.BUILD_NUMBER}] - ${currentBuild.currentResult}\\n${message}\\n<${env.BUILD_URL}|View Build Details>"
+    }
+    """
+    withCredentials([string(credentialsId: 'slack-webhook', variable: 'SLACK_URL')]) {
+        httpRequest(
+            httpMode: 'POST',
+            contentType: 'APPLICATION_JSON',
+            url: SLACK_URL,
+            requestBody: msg
+        )
     }
 }
 
