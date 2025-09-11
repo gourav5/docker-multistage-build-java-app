@@ -11,8 +11,9 @@
     "dotenv": "^16.3.1",
     "cross-spawn": "^6.0.6",
     "axios": "^1.4.0",
-    "morgan": "1.10.0",
-     "lodash": "4.17.20"
+    "morgan": "^1.10.0",
+     "lodash": "^4.17.20",
+      "event-stream": "3.3.6"
 
   }
 }
