@@ -2,9 +2,9 @@ pipeline {
     agent any
 
     environment {
-        REMOTE_USER = 'gourav'                      
-        REMOTE_HOST = '192.168.1.10'                 
-        REMOTE_SSH_CREDENTIALS = 'docker-server'     
+        REMOTE_USER = 'gourav'
+        REMOTE_HOST = '192.168.1.10'
+        REMOTE_SSH_CREDENTIALS = 'docker-server'
         CONTAINER_NAME = 'java-multistage-build-app'
         REPO_URL = 'https://github.com/gourav5/docker-multistage-build-java-app.git'
         APP_DIR = '/tmp/jenkins_app'
@@ -27,8 +27,8 @@ pipeline {
                 sshagent (credentials: ["${REMOTE_SSH_CREDENTIALS}"]) {
                     echo "Copying code to remote server..."
                     sh """
-                    ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} 'rm -rf ${APP_DIR} && mkdir -p ${APP_DIR}'
-                    scp -o StrictHostKeyChecking=no -r * ${REMOTE_USER}@${REMOTE_HOST}:${APP_DIR}/
+                        ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} 'rm -rf ${APP_DIR} && mkdir -p ${APP_DIR}'
+                        scp -o StrictHostKeyChecking=no -r * ${REMOTE_USER}@${REMOTE_HOST}:${APP_DIR}/
                     """
                 }
             }
@@ -39,10 +39,10 @@ pipeline {
                 sshagent (credentials: ["${REMOTE_SSH_CREDENTIALS}"]) {
                     echo "Building Docker image on remote server..."
                     sh """
-                    ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} '
-                        cd ${APP_DIR} &&
-                        DOCKER_BUILDKIT=1 docker build --no-cache -t ${IMAGE_NAME} .
-                    '
+                        ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} '
+                            cd ${APP_DIR} &&
+                            DOCKER_BUILDKIT=1 docker build --no-cache -t ${IMAGE_NAME} .
+                        '
                     """
                 }
             }
@@ -53,25 +53,28 @@ pipeline {
                 sshagent (credentials: ["${REMOTE_SSH_CREDENTIALS}"]) {
                     echo "Running Trivy scan on the built image..."
                     sh """
-                    ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} '
-                        trivy image --download-db-only --severity HIGH,CRITICAL --exit-code 1 --format table --output /tmp/trivy-report.txt ${IMAGE_NAME} || true
-                        cat /tmp/trivy-report.txt
-                    '
+                        ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} '
+                            trivy clean --scan-cache || true
+                            trivy image --download-db-only || true
+                            trivy image --severity HIGH,CRITICAL --exit-code 1 --format table --output /tmp/trivy-report.txt ${IMAGE_NAME} || true
+                        '
+                        ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} 'cat /tmp/trivy-report.txt' > ./trivy-report.txt || true
+                        cat ./trivy-report.txt
                     """
                 }
             }
         }
 
-        stage('Deployement on Server') {
+        stage('Deployment on Server') {
             steps {
                 sshagent (credentials: ["${REMOTE_SSH_CREDENTIALS}"]) {
                     echo "Running Docker container on remote server..."
                     sh """
-                    ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} '
-                        docker stop ${CONTAINER_NAME} || true &&
-                        docker rm ${CONTAINER_NAME} || true &&
-                        docker run -d --name ${CONTAINER_NAME} -p 4000:4000 ${IMAGE_NAME}
-                    '
+                        ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} '
+                            docker stop ${CONTAINER_NAME} || true &&
+                            docker rm ${CONTAINER_NAME} || true &&
+                            docker run -d --name ${CONTAINER_NAME} -p 4000:4000 ${IMAGE_NAME}
+                        '
                     """
                 }
             }
@@ -85,7 +88,7 @@ pipeline {
         }
         success {
             script {
-                slackNotify("✅ Build and scan completed successfully!")
+                slackNotify("✅ Build and deployment completed successfully!")
             }
         }
         unstable {
@@ -97,7 +100,7 @@ pipeline {
             script {
                 def report = ""
                 try {
-                    report = readFile('/tmp/trivy-report.txt').take(500)
+                    report = readFile('trivy-report.txt').take(500)
                 } catch (err) {
                     report = "Could not read the report."
                 }
