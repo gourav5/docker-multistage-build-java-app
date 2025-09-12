@@ -1,0 +1,9 @@
+{
+  "db": {
+    "password": "SuperSecretPassword123!"
+  },
+  "api": {
+    "key": "AKIAIOSFODNN7EXAMPLE"
+  }
+}
+
